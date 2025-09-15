@@ -1,0 +1,61 @@
+name: Payload Dumper Benchmark
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * 0"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y hyperfine unzip wget cargo git
+
+      - name: Clone repo (main branch)
+        run: |
+          git clone --branch main https://github.com/rhythmcache/payload-dumper-rust.git dumper-main
+          cd dumper-main
+          cargo build --release
+          mv target/release/payload_dumper ../payload_dumper_main
+
+      - name: Clone repo (ns branch)
+        run: |
+          git clone --branch ns https://github.com/rhythmcache/payload-dumper-rust.git dumper-ns
+          cd dumper-ns
+          cargo build --release
+          mv target/release/payload_dumper ../payload_dumper_ns
+
+      - name: Download OTA zip
+        run: |
+          wget -q https://dl.google.com/dl/android/aosp/comet-ota-ad1a.240530.030-98066022.zip -O ota.zip
+
+      - name: Extract payload.bin
+        run: |
+          unzip -j ota.zip 'payload.bin' -d .
+          ls -lh payload.bin
+
+      - name: Benchmark from OTA zip
+        run: |
+          hyperfine \
+            --export-json benchmark_zip.json \
+            './payload_dumper_main ota.zip' \
+            './payload_dumper_ns ota.zip'
+
+      - name: Benchmark from raw payload.bin
+        run: |
+          hyperfine \
+            --export-json benchmark_bin.json \
+            './payload_dumper_main payload.bin' \
+            './payload_dumper_ns payload.bin'
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark_zip.json
+            benchmark_bin.json
