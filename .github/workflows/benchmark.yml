@@ -42,15 +42,17 @@ jobs:
         run: |
           hyperfine \
             --export-json benchmark_zip.json \
-            './payload_dumper_main ota.zip' \
-            './payload_dumper_ns ota.zip'
+            './payload_dumper_main ota.zip -o output' \
+            './payload_dumper_ns ota.zip -o output'
+          rm -rf output
 
       - name: Benchmark from raw payload.bin
         run: |
           hyperfine \
             --export-json benchmark_bin.json \
-            './payload_dumper_main payload.bin' \
-            './payload_dumper_ns payload.bin'
+            './payload_dumper_main payload.bin -o output' \
+            './payload_dumper_ns payload.bin -o output'
+          rm -rf output
 
       - name: Upload Results
         uses: actions/upload-artifact@v4
