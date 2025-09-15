@@ -8,56 +8,103 @@ on:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        test_type: [zip_extraction, bin_extraction, direct_extraction]
+        branch: [main, ns]
+    
     steps:
       - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y hyperfine unzip wget cargo git
 
-      - name: Clone repo (main branch)
+      - name: Clone repo (${{ matrix.branch }} branch)
         run: |
-          git clone --branch main https://github.com/rhythmcache/payload-dumper-rust.git dumper-main
-          cd dumper-main
+          git clone --branch ${{ matrix.branch }} https://github.com/rhythmcache/payload-dumper-rust.git dumper-${{ matrix.branch }}
+          cd dumper-${{ matrix.branch }}
           cargo build --release
-          mv target/release/payload_dumper ../payload_dumper_main
-
-      - name: Clone repo (ns branch)
-        run: |
-          git clone --branch ns https://github.com/rhythmcache/payload-dumper-rust.git dumper-ns
-          cd dumper-ns
-          cargo build --release
-          mv target/release/payload_dumper ../payload_dumper_ns
+          mv target/release/payload_dumper ../payload_dumper_${{ matrix.branch }}
 
       - name: Download OTA zip
         run: |
           wget -q https://dl.google.com/dl/android/aosp/comet-ota-ad1a.240530.030-98066022.zip -O ota.zip
 
       - name: Extract payload.bin
+        if: matrix.test_type != 'zip_extraction'
         run: |
           unzip -j ota.zip 'payload.bin' -d .
           ls -lh payload.bin
 
-      - name: Benchmark from OTA zip
+      - name: Benchmark ZIP extraction
+        if: matrix.test_type == 'zip_extraction'
         run: |
           hyperfine \
-            --export-json benchmark_zip.json \
-            './payload_dumper_main ota.zip -o output' \
-            './payload_dumper_ns ota.zip -o output'
-          rm -rf output
+            --export-json benchmark_${{ matrix.branch }}_zip.json \
+            --runs 10 \
+            --warmup 2 \
+            --prepare 'rm -rf output_*' \
+            './payload_dumper_${{ matrix.branch }} ota.zip'
 
-      - name: Benchmark from raw payload.bin
+      - name: Benchmark raw payload.bin extraction
+        if: matrix.test_type == 'bin_extraction'
         run: |
           hyperfine \
-            --export-json benchmark_bin.json \
-            './payload_dumper_main payload.bin -o output' \
-            './payload_dumper_ns payload.bin -o output'
-          rm -rf output
+            --export-json benchmark_${{ matrix.branch }}_bin.json \
+            --runs 10 \
+            --warmup 2 \
+            --prepare 'rm -rf output_*' \
+            './payload_dumper_${{ matrix.branch }} payload.bin'
+
+      - name: Benchmark direct extraction (URL with specific images)
+        if: matrix.test_type == 'direct_extraction'
+        run: |
+          hyperfine \
+            --export-json benchmark_${{ matrix.branch }}_direct.json \
+            --runs 5 \
+            --warmup 1 \
+            --prepare 'rm -rf output_* && sleep 2' \
+            './payload_dumper_${{ matrix.branch }} --threads 3 --images boot,vendor_boot,modem https://dl.google.com/dl/android/aosp/comet-ota-ad1a.240530.030-98066022.zip'
 
       - name: Upload Results
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-results
+          name: benchmark-results-${{ matrix.branch }}-${{ matrix.test_type }}
           path: |
-            benchmark_zip.json
-            benchmark_bin.json
+            benchmark_*.json
+
+  aggregate-results:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-results-*
+          merge-multiple: true
+
+      - name: List all benchmark files
+        run: ls -la benchmark_*.json
+
+      - name: Create summary report
+        run: |
+          echo "# Payload Dumper Benchmark Results" > summary.md
+          echo "" >> summary.md
+          echo "## Test Results by Branch and Type" >> summary.md
+          echo "" >> summary.md
+          
+          for file in benchmark_*.json; do
+            echo "### $file" >> summary.md
+            echo '```json' >> summary.md
+            cat "$file" >> summary.md
+            echo '```' >> summary.md
+            echo "" >> summary.md
+          done
+
+      - name: Upload consolidated results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-summary
+          path: |
+            benchmark_*.json
+            summary.md
