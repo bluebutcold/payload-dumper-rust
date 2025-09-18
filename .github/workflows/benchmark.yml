@@ -47,11 +47,11 @@ jobs:
           if [ "${{ matrix.input }}" = "zip" ]; then
             hyperfine \
               --export-json benchmark_${{ matrix.impl }}_${{ matrix.input }}.json \
-              './payload_dumper ota.zip'
+              '../payload_dumper ota.zip'
           else
             hyperfine \
               --export-json benchmark_${{ matrix.impl }}_${{ matrix.input }}.json \
-              './payload_dumper payload.bin'
+              '../payload_dumper payload.bin'
           fi
 
       - name: Upload Results
